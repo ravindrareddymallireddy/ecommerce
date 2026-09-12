@@ -1,42 +1,24 @@
-import { useMemo, useState } from 'react'
-
-type Category = 'All' | 'Dresses' | 'Tops' | 'Denim' | 'Outerwear'
-type Product = {
-  id: number
-  name: string
-  category: Exclude<Category, 'All'>
-  price: number
-  color: string
-  tag?: string
-  image: string
-  imageAlt: string
-}
+import { useEffect, useMemo, useState } from 'react'
+import { useAuth } from './hooks/useAuth'
+import { fallbackProducts, loadProducts, type Category, type Product } from './lib/products'
+import { supabase } from './lib/supabaseClient'
 
 type CartLine = Product & { quantity: number; size: string }
-
-const products: Product[] = [
-  { id: 1, name: 'Sculpted cotton dress', category: 'Dresses', price: 168, color: 'bone', tag: 'New', image: 'https://images.unsplash.com/photo-1539008835657-9e8e9680c956?auto=format&fit=crop&w=900&q=85', imageAlt: 'Woman in an ivory sculpted cotton dress' },
-  { id: 2, name: 'Mara wide-leg jean', category: 'Denim', price: 148, color: 'indigo', tag: 'Best seller', image: 'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?auto=format&fit=crop&w=900&q=85', imageAlt: 'Model wearing wide-leg indigo jeans' },
-  { id: 3, name: 'Linen volume shirt', category: 'Tops', price: 98, color: 'chalk', image: 'https://images.unsplash.com/photo-1605763240000-7e93b172d754?auto=format&fit=crop&w=900&q=85', imageAlt: 'White linen button-up shirt' },
-  { id: 4, name: 'Longline wool coat', category: 'Outerwear', price: 298, color: 'charcoal', tag: 'Limited', image: 'https://images.unsplash.com/photo-1539533018447-63fcce2678e3?auto=format&fit=crop&w=900&q=85', imageAlt: 'Model in a tailored charcoal wool coat' },
-  { id: 5, name: 'Bias silk slip dress', category: 'Dresses', price: 210, color: 'clay', image: 'https://images.unsplash.com/photo-1566174053879-31528523f8ae?auto=format&fit=crop&w=900&q=85', imageAlt: 'Woman in a clay silk slip dress' },
-  { id: 6, name: 'Relaxed merino knit', category: 'Tops', price: 128, color: 'moss', image: 'https://images.unsplash.com/photo-1618932260643-eee4a2f652a6?auto=format&fit=crop&w=900&q=85', imageAlt: 'Soft green merino knit sweater' },
-  { id: 7, name: 'Atelier pleated trouser', category: 'Denim', price: 138, color: 'ink', image: 'https://images.unsplash.com/photo-1551488831-00ddcb6c6bd3?auto=format&fit=crop&w=900&q=85', imageAlt: 'Tailored pleated trouser in ink' },
-  { id: 8, name: 'Everyday utility jacket', category: 'Outerwear', price: 188, color: 'olive', image: 'https://images.unsplash.com/photo-1544966503-7cc5ac882d5f?auto=format&fit=crop&w=900&q=85', imageAlt: 'Olive utility jacket' },
-]
+type Route = { page: 'home' | 'shop' | 'product' | 'cart'; slug?: string }
 
 const navItems: Array<{ label: string; value: Category }> = [
-  { label: 'Shop all', value: 'All' },
-  { label: 'Dresses', value: 'Dresses' },
-  { label: 'Tops', value: 'Tops' },
-  { label: 'Denim', value: 'Denim' },
-  { label: 'Outerwear', value: 'Outerwear' },
+  { label: 'Shop all', value: 'All' }, { label: 'Dresses', value: 'Dresses' }, { label: 'Tops', value: 'Tops' }, { label: 'Denim', value: 'Denim' }, { label: 'Outerwear', value: 'Outerwear' },
 ]
 
-function formatPrice(value: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value)
+function getRoute(): Route {
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '')
+  if (path === 'shop') return { page: 'shop' }
+  if (path === 'cart') return { page: 'cart' }
+  if (path.startsWith('products/')) return { page: 'product', slug: path.slice('products/'.length) }
+  return { page: 'home' }
 }
 
+function formatPrice(value: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value) }
 function Icon({ name, size = 20 }: { name: 'search' | 'bag' | 'heart' | 'user' | 'arrow' | 'close' | 'menu' | 'chevron'; size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
   if (name === 'search') return <svg {...common}><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 5 5" /></svg>
@@ -49,129 +31,87 @@ function Icon({ name, size = 20 }: { name: 'search' | 'bag' | 'heart' | 'user' |
   return <svg {...common}><path d="m6 9 6 6 6-6" /></svg>
 }
 
-function ProductCard({ product, isSaved, onSave, onAdd }: { product: Product; isSaved: boolean; onSave: () => void; onAdd: () => void }) {
-  return (
-    <article className="product-card">
-      <div className="product-image-wrap">
-        <img src={product.image} alt={product.imageAlt} className="product-image" />
-        {product.tag && <span className="product-tag">{product.tag}</span>}
-        <button className={`save-button ${isSaved ? 'saved' : ''}`} onClick={onSave} aria-label={`Save ${product.name}`}><Icon name="heart" size={18} /></button>
-        <button className="quick-add" onClick={onAdd}>Quick add <Icon name="arrow" size={15} /></button>
-      </div>
-      <div className="product-meta">
-        <div><h3>{product.name}</h3><p>{product.color}</p></div>
-        <strong>{formatPrice(product.price)}</strong>
-      </div>
-    </article>
-  )
+function ProductCard({ product, isSaved, onSave, onAdd, onOpen }: { product: Product; isSaved: boolean; onSave: () => void; onAdd: () => void; onOpen: () => void }) {
+  return <article className="product-card">
+    <div className="product-image-wrap" onClick={onOpen} role="link" tabIndex={0} onKeyDown={(event) => event.key === 'Enter' && onOpen()}>
+      <img src={product.image} alt={product.imageAlt} className="product-image" />
+      {product.tag && <span className="product-tag">{product.tag}</span>}
+      <button className={`save-button ${isSaved ? 'saved' : ''}`} onClick={(event) => { event.stopPropagation(); onSave() }} aria-label={`Save ${product.name}`}><Icon name="heart" size={18} /></button>
+      <button className="quick-add" onClick={(event) => { event.stopPropagation(); onAdd() }}>Quick add <Icon name="arrow" size={15} /></button>
+    </div>
+    <div className="product-meta" onClick={onOpen} role="link"><div><h3>{product.name}</h3><p>{product.color}</p></div><strong>{formatPrice(product.price)}</strong></div>
+  </article>
 }
 
 function App() {
+  const [route, setRoute] = useState<Route>(getRoute)
+  const [products, setProducts] = useState<Product[]>(fallbackProducts)
+  const [productsLoading, setProductsLoading] = useState(true)
   const [category, setCategory] = useState<Category>('All')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('Featured')
-  const [cart, setCart] = useState<CartLine[]>([])
+  const [cart, setCart] = useState<CartLine[]>(() => { try { return JSON.parse(localStorage.getItem('monuments-cart') ?? '[]') as CartLine[] } catch { return [] } })
   const [saved, setSaved] = useState<number[]>([])
-  const [cartOpen, setCartOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
-  const [adminOpen, setAdminOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const { user, configured: authConfigured } = useAuth()
 
+  useEffect(() => { loadProducts().then((items) => { setProducts(items); setProductsLoading(false) }) }, [])
+  useEffect(() => { localStorage.setItem('monuments-cart', JSON.stringify(cart)) }, [cart])
+  useEffect(() => { const onPop = () => setRoute(getRoute()); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop) }, [])
+
+  function showNotice(message: string) { setNotice(message); window.setTimeout(() => setNotice(''), 2800) }
+  function go(path: string) { window.history.pushState({}, '', path); setRoute(getRoute()); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  function addToCart(product: Product, size = product.sizes[0] ?? 'M') {
+    setCart((current) => { const existing = current.find((item) => item.id === product.id && item.size === size); if (existing) return current.map((item) => item.id === product.id && item.size === size ? { ...item, quantity: Math.min(item.quantity + 1, product.inventory || 99) } : item); return [...current, { ...product, size, quantity: 1 }] })
+    showNotice(`${product.name} added to bag`)
+  }
+  function updateQuantity(id: number | string, size: string, delta: number) { setCart((current) => current.flatMap((item) => item.id !== id || item.size !== size ? [item] : item.quantity + delta <= 0 ? [] : [{ ...item, quantity: item.quantity + delta }])) }
+  function toggleSaved(id: number | string) { const numeric = Number(id); setSaved((current) => current.includes(numeric) ? current.filter((item) => item !== numeric) : [...current, numeric]) }
+  function selectCategory(value: Category) { setCategory(value); go('/shop') }
+  async function signIn() { if (!supabase) return showNotice('Add Supabase keys in Settings to enable sign in'); setAuthBusy(true); setAuthError(''); const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword }); if (error) setAuthError(error.message); else { setAccountOpen(false); showNotice('Welcome back to Monuments') }; setAuthBusy(false) }
+  async function signUp() { if (!supabase) return showNotice('Add Supabase keys in Settings to enable sign in'); setAuthBusy(true); setAuthError(''); const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword }); if (error) setAuthError(error.message); else showNotice('Check your email to confirm your account'); setAuthBusy(false) }
+  async function googleSignIn() { if (!supabase) return showNotice('Add Supabase keys in Settings to enable sign in'); const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } }); if (error) setAuthError(error.message) }
+
+  const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
+  const subtotal = cart.reduce((total, item) => total + item.price * item.quantity, 0)
+  const currentProduct = route.page === 'product' ? products.find((product) => product.slug === route.slug) : undefined
   const filteredProducts = useMemo(() => {
     const normalized = query.trim().toLowerCase()
-    const result = products.filter((product) => {
-      const matchesCategory = category === 'All' || product.category === category
-      const matchesQuery = !normalized || `${product.name} ${product.category} ${product.color}`.toLowerCase().includes(normalized)
-      return matchesCategory && matchesQuery
-    })
+    const result = products.filter((product) => (category === 'All' || product.category === category) && (!normalized || `${product.name} ${product.category} ${product.color}`.toLowerCase().includes(normalized)))
     if (sort === 'Price: low to high') return [...result].sort((a, b) => a.price - b.price)
     if (sort === 'Price: high to low') return [...result].sort((a, b) => b.price - a.price)
     if (sort === 'Newest') return [...result].reverse()
     return result
-  }, [category, query, sort])
+  }, [category, products, query, sort])
 
-  const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
-  const subtotal = cart.reduce((total, item) => total + item.price * item.quantity, 0)
+  return <div className="app-shell">
+    <div className="announcement">Complimentary shipping on orders over $150 <span>·</span> Made thoughtfully in New York</div>
+    <header className="site-header"><button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Open menu"><Icon name="menu" /></button><button className="wordmark" onClick={() => go('/')}>MONUMENTS</button><nav className={`main-nav ${menuOpen ? 'is-open' : ''}`}>{navItems.map((item) => <button key={item.value} className={category === item.value && route.page === 'shop' ? 'active' : ''} onClick={() => selectCategory(item.value)}>{item.label}</button>)}<button className="admin-link" onClick={() => showNotice('Admin tools are available after staff authentication')}>Admin portal</button></nav><div className="header-actions"><button onClick={() => setAccountOpen(true)} aria-label="Account"><Icon name="user" /></button><button onClick={() => showNotice(`${saved.length} saved pieces`)} className="desktop-action" aria-label="Wishlist"><Icon name="heart" /><span className="action-dot">{saved.length}</span></button><button onClick={() => go('/cart')} aria-label="Shopping bag"><Icon name="bag" /><span className="bag-count">{cartCount}</span></button></div></header>
 
-  function showNotice(message: string) {
-    setNotice(message)
-    window.setTimeout(() => setNotice(''), 2600)
-  }
+    {route.page === 'home' && <Home onShop={() => selectCategory('All')} />}
+    {route.page === 'shop' && <Shop products={filteredProducts} loading={productsLoading} category={category} setCategory={setCategory} query={query} setQuery={setQuery} sort={sort} setSort={setSort} saved={saved} onSave={toggleSaved} onAdd={addToCart} onOpen={(slug) => go(`/products/${slug}`)} />}
+    {route.page === 'product' && <ProductDetail product={currentProduct} onBack={() => go('/shop')} onAdd={addToCart} />}
+    {route.page === 'cart' && <CartPage cart={cart} subtotal={subtotal} onUpdate={updateQuantity} onShop={() => selectCategory('All')} onCheckout={() => showNotice(user ? 'Order checkout is ready for Stripe' : 'Sign in before checkout to save your order')} />}
 
-  function addToCart(product: Product) {
-    setCart((current) => {
-      const existing = current.find((item) => item.id === product.id)
-      if (existing) return current.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item)
-      return [...current, { ...product, quantity: 1, size: 'M' }]
-    })
-    setCartOpen(true)
-    showNotice(`${product.name} added to bag`)
-  }
+    <footer className="site-footer"><div className="footer-top"><button className="wordmark" onClick={() => go('/')}>MONUMENTS</button><p>Clothing for the in-between.</p><div className="footer-links"><button onClick={() => selectCategory('All')}>Shop</button><button onClick={() => showNotice('Our story is coming soon')}>About</button><button onClick={() => setAccountOpen(true)}>Account</button><button onClick={() => showNotice('Support will be with you shortly')}>Contact</button></div></div><div className="footer-bottom"><span>© 2024 Monuments Studio</span><span>New York · London · Everywhere</span><span>Privacy &nbsp; Terms</span></div></footer>
 
-  function toggleSaved(id: number) {
-    setSaved((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
-  }
-
-  function updateQuantity(id: number, delta: number) {
-    setCart((current) => current.flatMap((item) => item.id !== id ? [item] : item.quantity + delta <= 0 ? [] : [{ ...item, quantity: item.quantity + delta }]))
-  }
-
-  return (
-    <div className="app-shell">
-      <div className="announcement">Complimentary shipping on orders over $150 <span>·</span> Made thoughtfully in New York</div>
-      <header className="site-header">
-        <button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Open menu"><Icon name="menu" /></button>
-        <a href="#top" className="wordmark">MONUMENTS</a>
-        <nav className={`main-nav ${menuOpen ? 'is-open' : ''}`}>
-          {navItems.map((item) => <button key={item.value} className={category === item.value ? 'active' : ''} onClick={() => { setCategory(item.value); setMenuOpen(false); document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' }) }}>{item.label}</button>)}
-          <button onClick={() => setAdminOpen(true)} className="admin-link">Admin preview</button>
-        </nav>
-        <div className="header-actions">
-          <button onClick={() => setAccountOpen(true)} aria-label="Account"><Icon name="user" /></button>
-          <button onClick={() => setSaved((current) => current)} aria-label="Wishlist" className="desktop-action"><Icon name="heart" /><span className="action-dot">{saved.length}</span></button>
-          <button onClick={() => setCartOpen(true)} aria-label="Shopping bag" className="bag-action"><Icon name="bag" /><span className="bag-count">{cartCount}</span></button>
-        </div>
-      </header>
-
-      <main id="top">
-        <section className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">The autumn edit · 2024</p>
-            <h1>Made for<br /><em>the in-between.</em></h1>
-            <p className="hero-description">Clothing with room to move, made for the days that become something else.</p>
-            <button className="button button-dark" onClick={() => { setCategory('All'); document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' }) }}>Explore the collection <Icon name="arrow" size={17} /></button>
-          </div>
-          <div className="hero-image"><img src="https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=1500&q=88" alt="Model in an oversized black coat against a pale studio wall" /><div className="hero-caption"><span>01 / 04</span><span>Rituals of everyday</span></div></div>
-          <div className="hero-side-note">New perspectives<br />in familiar forms <span>↗</span></div>
-        </section>
-
-        <section className="manifesto"><p className="eyebrow">The Monuments point of view</p><p className="manifesto-copy">Less, but better. We make lasting pieces that meet you where you are — and become part of where you’re going.</p><a href="#story">Our approach <Icon name="arrow" size={15} /></a></section>
-
-        <section id="shop" className="shop-section">
-          <div className="section-heading"><div><p className="eyebrow">Curated for now</p><h2>Shop the collection</h2></div><p className="result-count">{filteredProducts.length} pieces</p></div>
-          <div className="shop-toolbar"><div className="category-pills">{navItems.map((item) => <button key={item.value} className={category === item.value ? 'selected' : ''} onClick={() => setCategory(item.value)}>{item.label}</button>)}</div><div className="toolbar-right"><label className="search-field"><Icon name="search" size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search pieces" /></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort products"><option>Featured</option><option>Newest</option><option>Price: low to high</option><option>Price: high to low</option></select></div></div>
-          {filteredProducts.length > 0 ? <div className="product-grid">{filteredProducts.map((product) => <ProductCard key={product.id} product={product} isSaved={saved.includes(product.id)} onSave={() => toggleSaved(product.id)} onAdd={() => addToCart(product)} />)}</div> : <div className="empty-state"><p>No pieces found.</p><button className="text-link" onClick={() => { setQuery(''); setCategory('All') }}>Clear filters <Icon name="arrow" size={15} /></button></div>}
-        </section>
-
-        <section className="feature-banner"><div className="feature-image"><img src="https://images.unsplash.com/photo-1485968579580-b6d095142e6e?auto=format&fit=crop&w=1100&q=85" alt="Neutral-toned clothing on a rack" /></div><div className="feature-copy"><p className="eyebrow">The daily uniform</p><h2>Good clothes<br /><em>keep their word.</em></h2><p>Our materials are chosen for how they feel today, and how they’ll live with you tomorrow.</p><button className="text-link" onClick={() => showNotice('Our materials journal is coming soon')}>Read our materials journal <Icon name="arrow" size={15} /></button></div></section>
-
-        <section id="story" className="story-section"><div className="story-heading"><p className="eyebrow">A quieter kind of progress</p><h2>Designed with<br /><em>intention.</em></h2></div><div className="story-details"><p>We believe what you wear should feel like an extension of your own point of view. Our collections are considered slowly, sourced responsibly, and made to outlast the season.</p><div className="story-stats"><div><strong>01</strong><span>Considered<br />design</span></div><div><strong>02</strong><span>Responsible<br />materials</span></div><div><strong>03</strong><span>Made to<br />last</span></div></div></div></section>
-
-        <section className="newsletter"><div><p className="eyebrow">Notes from Monuments</p><h2>Stay in the know.</h2><p>New pieces, studio notes, and things worth noticing. No noise.</p></div><form onSubmit={(event) => { event.preventDefault(); showNotice('You’re on the list — welcome in.') }}><input type="email" required placeholder="Your email address" aria-label="Your email address" /><button type="submit">Subscribe <Icon name="arrow" size={16} /></button></form></section>
-      </main>
-
-      <footer className="site-footer"><div className="footer-top"><a href="#top" className="wordmark">MONUMENTS</a><p>Clothing for the in-between.</p><div className="footer-links"><a href="#shop">Shop</a><a href="#story">About</a><button onClick={() => setAccountOpen(true)}>Account</button><button onClick={() => showNotice('Support will be with you shortly')}>Contact</button></div></div><div className="footer-bottom"><span>© 2024 Monuments Studio</span><span>New York · London · Everywhere</span><span>Privacy &nbsp; Terms</span></div></footer>
-
-      {cartOpen && <div className="overlay" onClick={() => setCartOpen(false)}><aside className="side-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><div><p className="eyebrow">Your selection</p><h2>Shopping bag <span>{cartCount}</span></h2></div><button onClick={() => setCartOpen(false)} aria-label="Close shopping bag"><Icon name="close" /></button></div>{cart.length ? <><div className="cart-lines">{cart.map((item) => <div className="cart-line" key={item.id}><img src={item.image} alt="" /><div className="cart-line-info"><h3>{item.name}</h3><p>Size {item.size} · {item.color}</p><div className="quantity"><button onClick={() => updateQuantity(item.id, -1)}>−</button><span>{item.quantity}</span><button onClick={() => updateQuantity(item.id, 1)}>+</button></div></div><strong>{formatPrice(item.price * item.quantity)}</strong></div>)}</div><div className="drawer-bottom"><div className="subtotal"><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div><p className="shipping-note">Shipping and taxes calculated at checkout</p><button className="button button-dark checkout-button" onClick={() => showNotice('Checkout is ready for Stripe when payments are enabled')}>Continue to checkout <Icon name="arrow" size={17} /></button></div></> : <div className="drawer-empty"><div className="empty-bag"><Icon name="bag" size={26} /></div><p>Your bag is waiting.</p><button className="text-link" onClick={() => { setCartOpen(false); document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' }) }}>Explore the collection <Icon name="arrow" size={15} /></button></div>}</aside></div>}
-
-      {accountOpen && <div className="modal-backdrop" onClick={() => setAccountOpen(false)}><div className="account-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setAccountOpen(false)}><Icon name="close" /></button><p className="eyebrow">Welcome to Monuments</p><h2>Your account,<br /><em>your edit.</em></h2><p className="modal-copy">Sign in to save pieces, view orders, and pick up where you left off.</p><button className="button button-dark full-button" onClick={() => showNotice('Sign in is ready for Firebase authentication')}>Continue with email <Icon name="arrow" size={17} /></button><button className="google-button" onClick={() => showNotice('Google sign-in is ready to connect')}>G <span>Continue with Google</span></button><p className="modal-legal">By continuing, you agree to our Terms and Privacy Policy.</p></div></div>}
-
-      {adminOpen && <div className="modal-backdrop" onClick={() => setAdminOpen(false)}><div className="admin-modal" onClick={(event) => event.stopPropagation()}><div className="admin-head"><div><p className="eyebrow">Monuments / Admin</p><h2>Store overview</h2></div><button className="modal-close" onClick={() => setAdminOpen(false)}><Icon name="close" /></button></div><div className="admin-grid"><div className="admin-card admin-wide"><span>Gross sales</span><strong>$24,860</strong><small>↑ 18.4% from last month</small><div className="chart"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div className="admin-card"><span>Orders</span><strong>184</strong><small>↑ 12 this week</small></div><div className="admin-card"><span>Low stock</span><strong>08</strong><small className="warning">Needs attention</small></div></div><div className="admin-table"><div><span>Recent orders</span><a href="#admin">View all ↗</a></div>{['#MN-1084', '#MN-1083', '#MN-1082'].map((order, index) => <p key={order}><b>{order}</b><span>{['Maya Thompson', 'Julian Bell', 'Sofia Reed'][index]}</span><em>{['Processing', 'Shipped', 'Delivered'][index]}</em><strong>{['$348', '$168', '$298'][index]}</strong></p>)}</div></div></div>}
-
-      {notice && <div className="toast"><span>✓</span>{notice}</div>}
-    </div>
-  )
+    {accountOpen && <div className="modal-backdrop" onClick={() => setAccountOpen(false)}><div className="account-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setAccountOpen(false)}><Icon name="close" /></button>{user ? <><p className="eyebrow">Your Monuments account</p><h2>Good to see<br /><em>you again.</em></h2><p className="modal-copy">{user.email}</p><button className="button button-dark full-button" onClick={async () => { await supabase?.auth.signOut(); setAccountOpen(false); showNotice('You have been signed out') }}>Sign out <Icon name="arrow" size={17} /></button></> : <><p className="eyebrow">Welcome to Monuments</p><h2>Your account,<br /><em>your edit.</em></h2><p className="modal-copy">Sign in to save pieces, view orders, and pick up where you left off.</p>{!authConfigured && <div className="auth-config-note">Add <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> in Settings → Environment.</div>}<label className="auth-field"><span>Email</span><input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="you@example.com" /></label><label className="auth-field"><span>Password</span><input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="At least 6 characters" /></label>{authError && <p className="auth-error">{authError}</p>}<button className="button button-dark full-button" disabled={authBusy} onClick={signIn}>{authBusy ? 'Signing in…' : 'Continue with email'} <Icon name="arrow" size={17} /></button><button className="text-link auth-signup" disabled={authBusy} onClick={signUp}>Create an account <Icon name="arrow" size={15} /></button><button className="google-button" disabled={authBusy} onClick={googleSignIn}>G <span>Continue with Google</span></button><p className="modal-legal">By continuing, you agree to our Terms and Privacy Policy.</p></>}</div></div>}
+    {notice && <div className="toast"><span>✓</span>{notice}</div>}
+  </div>
 }
+
+function Home({ onShop }: { onShop: () => void }) { return <main id="top"><section className="hero"><div className="hero-copy"><p className="eyebrow">The autumn edit · 2024</p><h1>Made for<br /><em>the in-between.</em></h1><p className="hero-description">Clothing with room to move, made for the days that become something else.</p><button className="button button-dark" onClick={onShop}>Explore the collection <Icon name="arrow" size={17} /></button></div><div className="hero-image"><img src="https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=1500&q=88" alt="Model in an oversized black coat against a pale studio wall" /><div className="hero-caption"><span>01 / 04</span><span>Rituals of everyday</span></div></div><div className="hero-side-note">New perspectives<br />in familiar forms <span>↗</span></div></section><section className="manifesto"><p className="eyebrow">The Monuments point of view</p><p className="manifesto-copy">Less, but better. We make lasting pieces that meet you where you are — and become part of where you’re going.</p><a href="#story">Our approach <Icon name="arrow" size={15} /></a></section><section className="feature-banner"><div className="feature-image"><img src="https://images.unsplash.com/photo-1485968579580-b6d095142e6e?auto=format&fit=crop&w=1100&q=85" alt="Neutral-toned clothing on a rack" /></div><div className="feature-copy"><p className="eyebrow">The daily uniform</p><h2>Good clothes<br /><em>keep their word.</em></h2><p>Our materials are chosen for how they feel today, and how they’ll live with you tomorrow.</p><button className="text-link" onClick={onShop}>Shop the edit <Icon name="arrow" size={15} /></button></div></section><section id="story" className="story-section"><div className="story-heading"><p className="eyebrow">A quieter kind of progress</p><h2>Designed with<br /><em>intention.</em></h2></div><div className="story-details"><p>We believe what you wear should feel like an extension of your own point of view. Our collections are considered slowly, sourced responsibly, and made to outlast the season.</p><div className="story-stats"><div><strong>01</strong><span>Considered<br />design</span></div><div><strong>02</strong><span>Responsible<br />materials</span></div><div><strong>03</strong><span>Made to<br />last</span></div></div></div></section><section className="newsletter"><div><p className="eyebrow">Notes from Monuments</p><h2>Stay in the know.</h2><p>New pieces, studio notes, and things worth noticing. No noise.</p></div><form onSubmit={(event) => { event.preventDefault() }}><input type="email" required placeholder="Your email address" aria-label="Your email address" /><button type="submit">Subscribe <Icon name="arrow" size={16} /></button></form></section></main> }
+
+function Shop({ products, loading, category, setCategory, query, setQuery, sort, setSort, saved, onSave, onAdd, onOpen }: { products: Product[]; loading: boolean; category: Category; setCategory: (category: Category) => void; query: string; setQuery: (value: string) => void; sort: string; setSort: (value: string) => void; saved: number[]; onSave: (id: number | string) => void; onAdd: (product: Product) => void; onOpen: (slug: string) => void }) { return <main className="shop-section"><div className="section-heading"><div><p className="eyebrow">Curated for now</p><h1 className="shop-title">Shop the collection</h1></div><p className="result-count">{products.length} pieces</p></div><div className="shop-toolbar"><div className="category-pills">{navItems.map((item) => <button key={item.value} className={category === item.value ? 'selected' : ''} onClick={() => setCategory(item.value)}>{item.label}</button>)}</div><div className="toolbar-right"><label className="search-field"><Icon name="search" size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search pieces" /></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort products"><option>Featured</option><option>Newest</option><option>Price: low to high</option><option>Price: high to low</option></select></div></div>{loading ? <div className="loading-state"><span></span><span></span><span></span></div> : products.length ? <div className="product-grid">{products.map((product) => <ProductCard key={product.id} product={product} isSaved={saved.includes(Number(product.id))} onSave={() => onSave(product.id)} onAdd={() => onAdd(product)} onOpen={() => onOpen(product.slug)} />)}</div> : <div className="empty-state"><p>No pieces found.</p><button className="text-link" onClick={() => { setQuery(''); setCategory('All') }}>Clear filters <Icon name="arrow" size={15} /></button></div>}</main> }
+
+function ProductDetail({ product, onBack, onAdd }: { product?: Product; onBack: () => void; onAdd: (product: Product, size: string) => void }) { const [size, setSize] = useState(product?.sizes[0] ?? 'M'); if (!product) return <main className="not-found"><p className="eyebrow">404 / Not found</p><h1>This piece has moved.</h1><button className="button button-dark" onClick={onBack}>Back to shop <Icon name="arrow" size={17} /></button></main>; return <main className="product-detail"><button className="back-link" onClick={onBack}>← Back to shop</button><div className="detail-layout"><div className="detail-image"><img src={product.image} alt={product.imageAlt} /></div><div className="detail-copy"><p className="eyebrow">{product.category} / {product.color}</p><h1>{product.name}</h1><strong className="detail-price">{formatPrice(product.price)}</strong><p className="detail-description">{product.description}</p><div className="detail-divider"></div><p className="selector-label">Select size <span>Size guide</span></p><div className="size-selector">{product.sizes.map((item) => <button key={item} className={size === item ? 'selected' : ''} onClick={() => setSize(item)}>{item}</button>)}</div><p className="inventory-note">{product.inventory < 10 ? `Only ${product.inventory} left` : 'In stock · Ships within 2–3 days'}</p><button className="button button-dark detail-add" onClick={() => onAdd(product, size)}>Add to bag <Icon name="bag" size={17} /></button><div className="detail-points"><p><b>Free shipping</b> on orders over $150</p><p><b>Easy returns</b> within 30 days</p><p><b>Made thoughtfully</b> with considered materials</p></div></div></div></main> }
+
+function CartPage({ cart, subtotal, onUpdate, onShop, onCheckout }: { cart: CartLine[]; subtotal: number; onUpdate: (id: number | string, size: string, delta: number) => void; onShop: () => void; onCheckout: () => void }) { return <main className="cart-page"><div className="cart-page-heading"><div><p className="eyebrow">Your selection</p><h1>Shopping bag <em>({cart.reduce((total, item) => total + item.quantity, 0)})</em></h1></div><button className="back-link" onClick={onShop}>Continue shopping →</button></div>{cart.length ? <div className="cart-layout"><div className="cart-lines-page">{cart.map((item) => <div className="cart-line-page" key={`${item.id}-${item.size}`}><img src={item.image} alt={item.imageAlt} /><div><p className="eyebrow">{item.category}</p><h3>{item.name}</h3><p className="cart-variant">{item.color} · Size {item.size}</p><div className="quantity"><button onClick={() => onUpdate(item.id, item.size, -1)}>−</button><span>{item.quantity}</span><button onClick={() => onUpdate(item.id, item.size, 1)}>+</button></div></div><strong>{formatPrice(item.price * item.quantity)}</strong></div>)}</div><aside className="order-summary"><p className="eyebrow">Order summary</p><div><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div><div><span>Shipping</span><span>Complimentary</span></div><div className="summary-total"><span>Total</span><strong>{formatPrice(subtotal)}</strong></div><button className="button button-dark checkout-button" onClick={onCheckout}>Continue to checkout <Icon name="arrow" size={17} /></button><p className="shipping-note">Taxes calculated at checkout</p></aside></div> : <div className="cart-empty"><div className="empty-bag"><Icon name="bag" size={26} /></div><h2>Your bag is waiting.</h2><p>Start with something considered.</p><button className="button button-dark" onClick={onShop}>Explore the collection <Icon name="arrow" size={17} /></button></div>}</main> }
 
 export default App
