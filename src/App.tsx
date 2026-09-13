@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from './hooks/useAuth'
+import { Icon } from './components/Icon'
+import { AdminPanel } from './components/AdminPanel'
+import { createCustomerOrder } from './lib/adminData'
 import { fallbackProducts, loadProducts, type Category, type Product } from './lib/products'
 import { supabase } from './lib/supabaseClient'
 
 type CartLine = Product & { quantity: number; size: string }
-type Route = { page: 'home' | 'shop' | 'product' | 'cart'; slug?: string }
+type Route = { page: 'home' | 'shop' | 'product' | 'cart' | 'admin'; slug?: string }
 
 const navItems: Array<{ label: string; value: Category }> = [
   { label: 'Shop all', value: 'All' }, { label: 'Dresses', value: 'Dresses' }, { label: 'Tops', value: 'Tops' }, { label: 'Denim', value: 'Denim' }, { label: 'Outerwear', value: 'Outerwear' },
@@ -14,22 +17,12 @@ function getRoute(): Route {
   const path = window.location.pathname.replace(/^\/+|\/+$/g, '')
   if (path === 'shop') return { page: 'shop' }
   if (path === 'cart') return { page: 'cart' }
+  if (path === 'admin') return { page: 'admin' }
   if (path.startsWith('products/')) return { page: 'product', slug: path.slice('products/'.length) }
   return { page: 'home' }
 }
 
 function formatPrice(value: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value) }
-function Icon({ name, size = 20 }: { name: 'search' | 'bag' | 'heart' | 'user' | 'arrow' | 'close' | 'menu' | 'chevron'; size?: number }) {
-  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
-  if (name === 'search') return <svg {...common}><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 5 5" /></svg>
-  if (name === 'bag') return <svg {...common}><path d="M5 8.5h14l1 12H4l1-12Z" /><path d="M8.5 9V6.5a3.5 3.5 0 0 1 7 0V9" /></svg>
-  if (name === 'heart') return <svg {...common}><path d="M20.8 8.9c0 5.4-8.8 10.3-8.8 10.3S3.2 14.3 3.2 8.9A4.6 4.6 0 0 1 12 6.7a4.6 4.6 0 0 1 8.8 2.2Z" /></svg>
-  if (name === 'user') return <svg {...common}><circle cx="12" cy="8" r="3.4" /><path d="M5.1 20c.6-3.4 3-5.2 6.9-5.2s6.3 1.8 6.9 5.2" /></svg>
-  if (name === 'arrow') return <svg {...common}><path d="M4 12h15" /><path d="m13 6 6 6-6 6" /></svg>
-  if (name === 'close') return <svg {...common}><path d="m6 6 12 12M18 6 6 18" /></svg>
-  if (name === 'menu') return <svg {...common}><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-  return <svg {...common}><path d="m6 9 6 6 6-6" /></svg>
-}
 
 function ProductCard({ product, isSaved, onSave, onAdd, onOpen }: { product: Product; isSaved: boolean; onSave: () => void; onAdd: () => void; onOpen: () => void }) {
   return <article className="product-card">
@@ -40,6 +33,7 @@ function ProductCard({ product, isSaved, onSave, onAdd, onOpen }: { product: Pro
       <button className="quick-add" onClick={(event) => { event.stopPropagation(); onAdd() }}>Quick add <Icon name="arrow" size={15} /></button>
     </div>
     <div className="product-meta" onClick={onOpen} role="link"><div><h3>{product.name}</h3><p>{product.color}</p></div><strong>{formatPrice(product.price)}</strong></div>
+    <button className="card-add" onClick={onAdd}>Add to bag <Icon name="bag" size={14} /></button>
   </article>
 }
 
@@ -77,6 +71,15 @@ function App() {
   async function signIn() { if (!supabase) return showNotice('Add Supabase keys in Settings to enable sign in'); setAuthBusy(true); setAuthError(''); const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword }); if (error) setAuthError(error.message); else { setAccountOpen(false); showNotice('Welcome back to Monuments') }; setAuthBusy(false) }
   async function signUp() { if (!supabase) return showNotice('Add Supabase keys in Settings to enable sign in'); setAuthBusy(true); setAuthError(''); const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword }); if (error) setAuthError(error.message); else showNotice('Check your email to confirm your account'); setAuthBusy(false) }
   async function googleSignIn() { if (!supabase) return showNotice('Add Supabase keys in Settings to enable sign in'); const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } }); if (error) setAuthError(error.message) }
+  async function checkout() {
+    if (!user) return showNotice('Sign in before checkout to save your order')
+    if (!supabase) return showNotice('Connect Supabase to place orders')
+    const placed = await createCustomerOrder({ userId: user.id, email: user.email ?? '', lines: cart.map((item) => ({ productId: item.id, name: item.name, color: item.color, size: item.size, unitPrice: item.price, quantity: item.quantity })) })
+    if (!placed) return showNotice('Orders need the Supabase schema — see supabase/schema.sql')
+    setCart([])
+    showNotice('Order placed — thank you!')
+    go('/')
+  }
 
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
   const subtotal = cart.reduce((total, item) => total + item.price * item.quantity, 0)
@@ -91,15 +94,17 @@ function App() {
   }, [category, products, query, sort])
 
   return <div className="app-shell">
-    <div className="announcement">Complimentary shipping on orders over $150 <span>·</span> Made thoughtfully in New York</div>
-    <header className="site-header"><button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Open menu"><Icon name="menu" /></button><button className="wordmark" onClick={() => go('/')}>MONUMENTS</button><nav className={`main-nav ${menuOpen ? 'is-open' : ''}`}>{navItems.map((item) => <button key={item.value} className={category === item.value && route.page === 'shop' ? 'active' : ''} onClick={() => selectCategory(item.value)}>{item.label}</button>)}<button className="admin-link" onClick={() => showNotice('Admin tools are available after staff authentication')}>Admin portal</button></nav><div className="header-actions"><button onClick={() => setAccountOpen(true)} aria-label="Account"><Icon name="user" /></button><button onClick={() => showNotice(`${saved.length} saved pieces`)} className="desktop-action" aria-label="Wishlist"><Icon name="heart" /><span className="action-dot">{saved.length}</span></button><button onClick={() => go('/cart')} aria-label="Shopping bag"><Icon name="bag" /><span className="bag-count">{cartCount}</span></button></div></header>
+    {route.page !== 'admin' && <div className="announcement">Complimentary shipping on orders over $150 <span>·</span> Made thoughtfully in New York</div>}
+    {route.page !== 'admin' && <header className="site-header"><button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Open menu"><Icon name="menu" /></button><button className="wordmark" onClick={() => go('/')}>MONUMENTS</button><nav className={`main-nav ${menuOpen ? 'is-open' : ''}`}>{navItems.map((item) => <button key={item.value} className={category === item.value && route.page === 'shop' ? 'active' : ''} onClick={() => selectCategory(item.value)}>{item.label}</button>)}<button className="admin-link" onClick={() => go('/admin')}>Admin portal</button></nav><div className="header-actions"><button onClick={() => setAccountOpen(true)} aria-label="Account"><Icon name="user" /></button><button onClick={() => showNotice(`${saved.length} saved pieces`)} className="desktop-action" aria-label="Wishlist"><Icon name="heart" /><span className="action-dot">{saved.length}</span></button><button onClick={() => go('/cart')} aria-label="Shopping bag"><Icon name="bag" /><span className="bag-count">{cartCount}</span></button></div></header>}
 
     {route.page === 'home' && <Home onShop={() => selectCategory('All')} />}
     {route.page === 'shop' && <Shop products={filteredProducts} loading={productsLoading} category={category} setCategory={setCategory} query={query} setQuery={setQuery} sort={sort} setSort={setSort} saved={saved} onSave={toggleSaved} onAdd={addToCart} onOpen={(slug) => go(`/products/${slug}`)} />}
     {route.page === 'product' && <ProductDetail product={currentProduct} onBack={() => go('/shop')} onAdd={addToCart} />}
-    {route.page === 'cart' && <CartPage cart={cart} subtotal={subtotal} onUpdate={updateQuantity} onShop={() => selectCategory('All')} onCheckout={() => showNotice(user ? 'Order checkout is ready for Stripe' : 'Sign in before checkout to save your order')} />}
+    {route.page === 'cart' && <CartPage cart={cart} subtotal={subtotal} onUpdate={updateQuantity} onShop={() => selectCategory('All')} onCheckout={checkout} />}
+    {route.page === 'admin' && <AdminPanel user={user} authConfigured={authConfigured} onGoStore={() => go('/')} />}
 
-    <footer className="site-footer"><div className="footer-top"><button className="wordmark" onClick={() => go('/')}>MONUMENTS</button><p>Clothing for the in-between.</p><div className="footer-links"><button onClick={() => selectCategory('All')}>Shop</button><button onClick={() => showNotice('Our story is coming soon')}>About</button><button onClick={() => setAccountOpen(true)}>Account</button><button onClick={() => showNotice('Support will be with you shortly')}>Contact</button></div></div><div className="footer-bottom"><span>© 2024 Monuments Studio</span><span>New York · London · Everywhere</span><span>Privacy &nbsp; Terms</span></div></footer>
+    {route.page !== 'admin' && <footer className="site-footer"><div className="footer-top"><button className="wordmark" onClick={() => go('/')}>MONUMENTS</button><p>Clothing for the in-between.</p><div className="footer-links"><button onClick={() => selectCategory('All')}>Shop</button><button onClick={() => showNotice('Our story is coming soon')}>About</button><button onClick={() => setAccountOpen(true)}>Account</button><button onClick={() => showNotice('Support will be with you shortly')}>Contact</button></div></div><div className="footer-bottom"><span>© 2024 Monuments Studio</span><span>New York · London · Everywhere</span><span>Privacy &nbsp; Terms</span></div></footer>}
+    {route.page !== 'admin' && <nav className="mobile-dock" aria-label="Mobile navigation"><button className={route.page === 'shop' ? 'active' : ''} onClick={() => selectCategory('All')}><Icon name="search" size={18} /><span>Shop</span></button><button onClick={() => showNotice(`${saved.length} saved pieces`)}><Icon name="heart" size={18} /><span>Saved {saved.length > 0 && `· ${saved.length}`}</span></button><button className={route.page === 'cart' ? 'active' : ''} onClick={() => go('/cart')}><Icon name="bag" size={18} /><span>Bag {cartCount > 0 && `· ${cartCount}`}</span></button><button onClick={() => setAccountOpen(true)}><Icon name="user" size={18} /><span>Account</span></button></nav>}
 
     {accountOpen && <div className="modal-backdrop" onClick={() => setAccountOpen(false)}><div className="account-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setAccountOpen(false)}><Icon name="close" /></button>{user ? <><p className="eyebrow">Your Monuments account</p><h2>Good to see<br /><em>you again.</em></h2><p className="modal-copy">{user.email}</p><button className="button button-dark full-button" onClick={async () => { await supabase?.auth.signOut(); setAccountOpen(false); showNotice('You have been signed out') }}>Sign out <Icon name="arrow" size={17} /></button></> : <><p className="eyebrow">Welcome to Monuments</p><h2>Your account,<br /><em>your edit.</em></h2><p className="modal-copy">Sign in to save pieces, view orders, and pick up where you left off.</p>{!authConfigured && <div className="auth-config-note">Add <b>VITE_SUPABASE_URL</b> and <b>VITE_SUPABASE_ANON_KEY</b> in Settings → Environment.</div>}<label className="auth-field"><span>Email</span><input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="you@example.com" /></label><label className="auth-field"><span>Password</span><input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="At least 6 characters" /></label>{authError && <p className="auth-error">{authError}</p>}<button className="button button-dark full-button" disabled={authBusy} onClick={signIn}>{authBusy ? 'Signing in…' : 'Continue with email'} <Icon name="arrow" size={17} /></button><button className="text-link auth-signup" disabled={authBusy} onClick={signUp}>Create an account <Icon name="arrow" size={15} /></button><button className="google-button" disabled={authBusy} onClick={googleSignIn}>G <span>Continue with Google</span></button><p className="modal-legal">By continuing, you agree to our Terms and Privacy Policy.</p></>}</div></div>}
     {notice && <div className="toast"><span>✓</span>{notice}</div>}
